@@ -19,13 +19,29 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError
         return p
 
+    def cors_headers(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+        self.send_header("Connection", "close")
+
     def send_json(self, code, data):
         body = json.dumps(data).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self.cors_headers()
         self.end_headers()
         self.wfile.write(body)
+
+    def send_empty(self, code):
+        self.send_response(code)
+        self.send_header("Content-Length", "0")
+        self.cors_headers()
+        self.end_headers()
+
+    def do_OPTIONS(self):
+        self.send_empty(200)
 
     def do_GET(self):
         if not self.auth():
@@ -62,7 +78,6 @@ class Handler(BaseHTTPRequestHandler):
 
         else:
             self.send_empty(404)
-            return
 
     def do_POST(self):
         if not self.auth():
@@ -101,23 +116,6 @@ class Handler(BaseHTTPRequestHandler):
         p.write_text(content + "\n")
 
         self.send_json(200, {"ok": True})
-
-    def do_OPTIONS(self):
-        self.send_response(200)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
-        self.end_headers()
-
-    def end_headers(self):
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Connection", "close")
-        super().end_headers()
-
-    def send_empty(self, code):
-        self.send_response(code)
-        self.send_header("Content-Length", "0")
-        self.end_headers()
 
 server = HTTPServer(("127.0.0.1", 8765), Handler)
 print("Listening on 127.0.0.1:8765")

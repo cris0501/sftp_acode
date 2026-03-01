@@ -36,18 +36,19 @@ async function openRemoteFile() {
     const filename = path.split('/').pop() || path;
 
     // Crear pestaña en el editor
-    const file = acode.newEditorFile(filename, {
+    acode.newEditorFile(filename, {
       text: data.content,
       editable: true,
+      render: true,
     });
+
+    const file = editorManager.activeFile;
 
     // Guardar mtime para detección de conflictos
     let lastMtime = data.mtime;
 
     // Interceptar el guardado
-    editorManager.on('save-file', async (fileObj) => {
-      if (fileObj !== file) return;
-
+    file.save = async () => {
       try {
         const content = file.session.getValue();
         const result = await apiRequest('/fs/write', {
@@ -60,9 +61,9 @@ async function openRemoteFile() {
         });
 
         if (result.ok) {
-          // Actualizar mtime tras guardar exitosamente
           const fresh = await apiRequest(`/fs/read?path=${encodeURIComponent(path)}`);
           lastMtime = fresh.mtime;
+          file.isUnsaved = false;
           window.toast('Guardado en Termux', 3000);
         }
       } catch (err) {
@@ -72,7 +73,7 @@ async function openRemoteFile() {
           acode.alert('Error al guardar', err.message);
         }
       }
-    });
+    };
 
     window.toast(`Abierto: ${path}`, 3000);
   } catch (err) {
@@ -130,33 +131,44 @@ async function browseRemoteDir() {
         // Reutilizar lógica de apertura simulando el prompt
         const data = await apiRequest(`/fs/read?path=${encodeURIComponent(fullPath)}`);
         const filename = entry.name;
-
-        const file = acode.newEditorFile(filename, {
+        
+        acode.newEditorFile(filename, {
           text: data.content,
           editable: true,
+          render: true,
         });
+
+        const file = editorManager.activeFile;
 
         let lastMtime = data.mtime;
 
-        editorManager.on('save-file', async (fileObj) => {
-          if (fileObj !== file) return;
+        file.save = async () => {
           try {
             const content = file.session.getValue();
-            await apiRequest('/fs/write', {
+            const result = await apiRequest('/fs/write', {
               method: 'POST',
               body: JSON.stringify({
-                path: fullPath,
+                path,
                 content,
                 mtime: lastMtime,
               }),
             });
-            const fresh = await apiRequest(`/fs/read?path=${encodeURIComponent(fullPath)}`);
-            lastMtime = fresh.mtime;
-            window.toast('Guardado en Termux', 3000);
+
+            if (result.ok) {
+              const fresh = await apiRequest(`/fs/read?path=${encodeURIComponent(path)}`);
+              lastMtime = fresh.mtime;
+              file.isUnsaved = false;
+              file.markChanged = false;
+              window.toast('Guardado en Termux', 3000);
+            }
           } catch (err) {
-            acode.alert('Error al guardar', err.message);
+            if (err.message.includes('409')) {
+              acode.alert('Conflicto', 'El archivo cambió en el servidor. Vuelve a abrirlo.');
+            } else {
+              acode.alert('Error al guardar', err.message);
+            }
           }
-        });
+        };
 
         window.toast(`Abierto: ${fullPath}`, 3000);
       }
