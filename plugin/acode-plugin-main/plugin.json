@@ -1,0 +1,15 @@
+{
+  "id": "com.cris.termux-fs",
+  "name": "Termux FS",
+  "main": "dist/main.js",
+  "version": "1.0.0",
+  "readme": "readme.md",
+  "icon": "icon.png",
+  "minVersionCode": 292,
+  "price": 0,
+  "author": {
+    "name": "Cris",
+    "email": "cris@example.com",
+    "github": "cris"
+  }
+}
