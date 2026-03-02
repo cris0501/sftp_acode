@@ -2,6 +2,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 import json
 import urllib.parse
+import shutil
 
 HOME = Path("/data/data/com.termux/files/home")
 TOKEN = "dev-token"
@@ -21,7 +22,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def cors_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
         self.send_header("Connection", "close")
 
@@ -40,9 +41,15 @@ class Handler(BaseHTTPRequestHandler):
         self.cors_headers()
         self.end_headers()
 
+    def read_body(self):
+        length = int(self.headers.get("Content-Length", 0))
+        return json.loads(self.rfile.read(length))
+
     def do_OPTIONS(self):
         self.send_empty(200)
 
+    # GET /fs/list?path=  → listar directorio
+    # GET /fs/read?path=  → leer archivo
     def do_GET(self):
         if not self.auth():
             self.send_empty(401)
@@ -79,7 +86,45 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_empty(404)
 
+    # POST /fs/create → crear archivo o carpeta
     def do_POST(self):
+        if not self.auth():
+            self.send_empty(401)
+            return
+
+        if self.path != "/fs/create":
+            self.send_empty(404)
+            return
+
+        try:
+            data = self.read_body()
+            path = data["path"]
+            kind = data.get("type", "file")
+            content = data.get("content", "")
+        except:
+            self.send_empty(400)
+            return
+
+        try:
+            p = self.resolve(path)
+        except:
+            self.send_empty(403)
+            return
+
+        if p.exists():
+            self.send_json(409, {"error": "Already exists"})
+            return
+
+        if kind == "dir":
+            p.mkdir(parents=True, exist_ok=True)
+        else:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content + "\n" if content else "")
+
+        self.send_json(201, {"ok": True, "path": str(p.relative_to(HOME))})
+
+    # PATCH /fs/write → editar archivo existente
+    def do_PATCH(self):
         if not self.auth():
             self.send_empty(401)
             return
@@ -88,11 +133,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_empty(404)
             return
 
-        length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(length)
-
         try:
-            data = json.loads(body)
+            data = self.read_body()
             path = data["path"]
             content = data["content"]
             mtime = data.get("mtime")
@@ -114,6 +156,43 @@ class Handler(BaseHTTPRequestHandler):
 
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content + "\n")
+        self.send_json(200, {"ok": True})
+
+    # DELETE /fs/delete → eliminar archivo o carpeta
+    def do_DELETE(self):
+        if not self.auth():
+            self.send_empty(401)
+            return
+
+        if self.path != "/fs/delete":
+            self.send_empty(404)
+            return
+
+        try:
+            data = self.read_body()
+            path = data["path"]
+        except:
+            self.send_empty(400)
+            return
+
+        try:
+            p = self.resolve(path)
+        except:
+            self.send_empty(403)
+            return
+
+        if not p.exists():
+            self.send_json(404, {"error": "Not found"})
+            return
+
+        if p == HOME:
+            self.send_json(403, {"error": "Cannot delete home"})
+            return
+
+        if p.is_dir():
+            shutil.rmtree(p)
+        else:
+            p.unlink()
 
         self.send_json(200, {"ok": True})
 
