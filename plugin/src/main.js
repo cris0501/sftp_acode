@@ -82,19 +82,19 @@ async function openRemoteFile() {
 }
 
 async function browseRemoteDir() {
-  let currentPath = '';
-
   async function showDir(dirPath) {
     try {
       const entries = await apiRequest(`/fs/list?path=${encodeURIComponent(dirPath)}`);
 
-      // Ordenar: directorios primero, luego archivos
-      entries.sort((a, b) => {
-        if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
-        return a.name.localeCompare(b.name);
-      });
+      // Filtrar ocultos y ordenar
+      const filtered = entries
+        .filter(e => !e.name.startsWith('.'))
+        .sort((a, b) => {
+          if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+          return a.name.localeCompare(b.name);
+        });
 
-      const options = entries.map(e =>
+      const options = filtered.map(e =>
         e.type === 'dir' ? `📁 ${e.name}` : `📄 ${e.name}`
       );
 
@@ -104,20 +104,27 @@ async function browseRemoteDir() {
 
       const selected = await acode.select(
         `Termux: /${dirPath || '~'}`,
-        options,
-        { default: 0 }
+        options
       );
 
       if (selected === undefined || selected === null) return;
 
-      const label = options[selected];
+      // acode.select puede retornar string o índice
+      let label = selected;
+      if (typeof selected === 'number') {
+        label = options[selected];
+      }
+
+      if (!label) return;
 
       if (label === '⬆️ ..') {
         const parent = dirPath.split('/').slice(0, -1).join('/');
         return showDir(parent);
       }
 
-      const entry = entries[dirPath ? selected - 1 : selected];
+      // Extraer nombre quitando el emoji
+      const name = label.replace(/^📁 |^📄 /, '');
+      const entry = filtered.find(e => e.name === name);
 
       if (!entry) return;
 
@@ -125,53 +132,41 @@ async function browseRemoteDir() {
 
       if (entry.type === 'dir') {
         return showDir(fullPath);
-      } else {
-        // Es archivo: abrirlo
-        currentPath = fullPath;
-        // Reutilizar lógica de apertura simulando el prompt
-        const data = await apiRequest(`/fs/read?path=${encodeURIComponent(fullPath)}`);
-        const filename = entry.name;
-        
-        acode.newEditorFile(filename, {
-          text: data.content,
-          editable: true,
-          render: true,
-        });
-
-        const file = editorManager.activeFile;
-
-        let lastMtime = data.mtime;
-
-        file.save = async () => {
-          try {
-            const content = file.session.getValue();
-            const result = await apiRequest('/fs/write', {
-              method: 'POST',
-              body: JSON.stringify({
-                path,
-                content,
-                mtime: lastMtime,
-              }),
-            });
-
-            if (result.ok) {
-              const fresh = await apiRequest(`/fs/read?path=${encodeURIComponent(path)}`);
-              lastMtime = fresh.mtime;
-              file.isUnsaved = false;
-              file.markChanged = false;
-              window.toast('Guardado en Termux', 3000);
-            }
-          } catch (err) {
-            if (err.message.includes('409')) {
-              acode.alert('Conflicto', 'El archivo cambió en el servidor. Vuelve a abrirlo.');
-            } else {
-              acode.alert('Error al guardar', err.message);
-            }
-          }
-        };
-
-        window.toast(`Abierto: ${fullPath}`, 3000);
       }
+
+      // Abrir archivo
+      const data = await apiRequest(`/fs/read?path=${encodeURIComponent(fullPath)}`);
+
+      acode.newEditorFile(entry.name, {
+        text: data.content,
+        editable: true,
+        render: true,
+      });
+
+      const file = editorManager.activeFile;
+      let lastMtime = data.mtime;
+
+      file.save = async () => {
+        try {
+          const content = file.session.getValue();
+          await apiRequest('/fs/write', {
+            method: 'POST',
+            body: JSON.stringify({
+              path: fullPath,
+              content,
+              mtime: lastMtime,
+            }),
+          });
+          const fresh = await apiRequest(`/fs/read?path=${encodeURIComponent(fullPath)}`);
+          lastMtime = fresh.mtime;
+          file.isUnsaved = false;
+          window.toast('Guardado en Termux', 3000);
+        } catch (err) {
+          acode.alert('Error al guardar', err.message);
+        }
+      };
+
+      window.toast(`Abierto: ${fullPath}`, 3000);
     } catch (err) {
       acode.alert('Error', `No se pudo listar: ${err.message}`);
     }
