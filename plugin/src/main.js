@@ -635,9 +635,23 @@ async function browseAndAdd() {
 
 acode.setPluginInit(PLUGIN_ID, (baseUrl, $page, cache) => {
   sideBarApps = acode.require('sideBarApps');
+  
+  const style = document.createElement('style');
+  style.textContent = `
+    .icon_termux_fs {
+      display: inline-block !important;
+      width: 18px !important;
+      height: 18px !important;
+      background-image: url('${baseUrl}icon.png') !important;
+      background-size: contain !important;
+      background-repeat: no-repeat !important;
+      background-position: center !important;
+    }
+  `;
+  document.head.appendChild(style);
 
   sideBarApps.add(
-    'icon_terminal',
+    'icon_termux_fs',
     'termux-fs',
     'Termux FS',
     (container) => {
@@ -669,8 +683,11 @@ acode.setPluginUnmount(PLUGIN_ID, () => {
   registeredCommands.forEach(name => commands.removeCommand(name));
   registeredCommands = [];
   if (sideBarApps) sideBarApps.remove('termux-fs');
+  style.remove();
   mainContainer = null;
   openFolders = [];
   openFiles = new Map();
 });
+
+
 
